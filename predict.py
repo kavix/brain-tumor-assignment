@@ -1,113 +1,116 @@
 import os
 import sys
 import argparse
-import pandas as pd
 import numpy as np
+import pandas as pd
 import torch
-import torch.nn as nn
 import joblib
 
-# Add src to python path to resolve package imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
+# Add src/ to PYTHONPATH so we can import our modules
+sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
 from brain_tumor_prediction.models.neural_net import BrainTumorMLP
 from brain_tumor_prediction.models.train import load_model_h5
 
 def main():
-    parser = argparse.ArgumentParser(description="Run inference with the trained Brain Tumor MLP classifier.")
-    parser.add_argument('data_path', type=str, nargs='?', default='data/raw/brain_tumor_data.csv',
-                        help="Path to the input CSV file in brain_tumor_data.csv format.")
+    parser = argparse.ArgumentParser(description="Predict brain tumor types from clinical data CSV.")
+    parser.add_argument('--data', type=str, default='data/raw/brain_tumor_data.csv',
+                        help="Path to the input CSV file containing patient records.")
     parser.add_argument('--output', type=str, default='predictions.csv',
-                        help="Path to save the output predictions CSV.")
-    parser.add_argument('--model_weights', type=str, default='studentID_model.h5',
-                        help="Path to the HDF5 weights file.")
-    parser.add_argument('--pipeline_path', type=str, default='preprocessing_pipeline.joblib',
-                        help="Path to the preprocessor joblib file.")
-    
+                        help="Path to save the predicted classes CSV.")
+    parser.add_argument('--model', type=str, default='studentID_model.h5',
+                        help="Path to the trained model H5 file.")
+    parser.add_argument('--pipeline', type=str, default='preprocessing_pipeline.joblib',
+                        help="Path to the fitted preprocessing pipeline joblib file.")
     args = parser.parse_args()
-    
-    # 1. Check file existence
-    if not os.path.exists(args.data_path):
-        print(f"Error: Input data file '{args.data_path}' not found.")
+
+    # Verify input file exists
+    if not os.path.exists(args.data):
+        print(f"Error: Input data file {args.data} does not exist.")
         sys.exit(1)
-        
-    if not os.path.exists(args.pipeline_path):
-        # Fallback to models/
-        args.pipeline_path = os.path.join('models', 'preprocessing_pipeline.joblib')
-        if not os.path.exists(args.pipeline_path):
-            print(f"Error: Preprocessing pipeline file not found.")
+
+    # Resolve model path (fall back to student_id_model.h5 if studentID_model.h5 is missing)
+    model_path = args.model
+    if not os.path.exists(model_path):
+        fallback_path = 'student_id_model.h5'
+        if os.path.exists(fallback_path):
+            model_path = fallback_path
+        else:
+            print(f"Error: Model file {args.model} (and fallback {fallback_path}) does not exist.")
             sys.exit(1)
-            
-    if not os.path.exists(args.model_weights):
-        # Fallback to models/
-        args.model_weights = os.path.join('models', 'studentID_model.h5')
-        if not os.path.exists(args.model_weights):
-            print(f"Error: Model weights file '{args.model_weights}' not found.")
+
+    # Verify pipeline exists
+    if not os.path.exists(args.pipeline):
+        fallback_pipeline = 'models/preprocessing_pipeline.joblib'
+        if os.path.exists(fallback_pipeline):
+            pipeline_path = fallback_pipeline
+        else:
+            print(f"Error: Preprocessing pipeline file {args.pipeline} does not exist.")
             sys.exit(1)
-            
-    print(f"Loading preprocessing pipeline from: {args.pipeline_path}")
-    pipeline = joblib.load(args.pipeline_path)
-    
-    print(f"Loading input data from: {args.data_path}")
-    df = pd.read_csv(args.data_path)
-    
-    # Check if target column is in data (if so, we ignore it for prediction)
-    if 'tumor_type' in df.columns:
-        df_feats = df.drop(columns=['tumor_type'])
     else:
-        df_feats = df.copy()
-        
-    # 2. Run Preprocessing
-    print("Preprocessing data...")
-    try:
-        X_trans = pipeline.transform(df_feats)
-    except Exception as e:
-        print(f"Error during preprocessing: {e}")
-        print("Please ensure your CSV matches the exact formatting requirements (columns and types).")
-        sys.exit(1)
-        
-    input_dim = X_trans.shape[1]
-    
-    # 3. Load MLP Model Architecture and Weights
-    print(f"Initializing model with input dimension: {input_dim}")
-    # Initialize architecture corresponding to the best tuned configuration (ID 12: [64, 32], lr=0.001, dropout=0.2, batch=32)
+        pipeline_path = args.pipeline
+
+    print(f"Loading preprocessing pipeline from: {pipeline_path}")
+    preprocessor = joblib.load(pipeline_path)
+
+    # Hardcoded parameters of the best trained configuration:
+    # Config 12: Hidden=[64, 32], LR=0.001, Dropout=0.2, Batch=32
+    input_dim = 50
+    hidden_dims = [64, 32]
+    output_dim = 3
+    dropout_rate = 0.2
+    use_batch_norm = False # Default
+
+    print(f"Instantiating model with: input_dim={input_dim}, hidden_dims={hidden_dims}, output_dim={output_dim}, dropout_rate={dropout_rate}")
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = BrainTumorMLP(
         input_dim=input_dim,
-        hidden_dims=[64, 32],
-        output_dim=3,
-        dropout_rate=0.2
-    )
-    
-    print(f"Loading model weights from: {args.model_weights}")
-    model = load_model_h5(model, args.model_weights)
+        hidden_dims=hidden_dims,
+        output_dim=output_dim,
+        dropout_rate=dropout_rate,
+        use_batch_norm=use_batch_norm
+    ).to(device)
+
+    print(f"Loading neural network weights from: {model_path}")
+    model = load_model_h5(model, model_path).to(device)
     model.eval()
+
+    # Load input data
+    print(f"Loading input data from: {args.data}")
+    df_raw = pd.read_csv(args.data)
     
-    # 4. Perform Inference
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model.to(device)
-    
-    inputs_tensor = torch.tensor(X_trans, dtype=torch.float32).to(device)
-    
-    print("Running inference...")
+    # Store patient_id for output reference
+    patient_ids = df_raw['patient_id'] if 'patient_id' in df_raw.columns else pd.Series([f"PT_{i}" for i in range(len(df_raw))])
+
+    # Preprocess
+    print("Preprocessing input features...")
+    X_processed = preprocessor.transform(df_raw)
+
+    # Predict
+    print("Running predictions through neural network...")
+    X_tensor = torch.tensor(X_processed, dtype=torch.float32).to(device)
     with torch.no_grad():
-        outputs = model(inputs_tensor)
-        probabilities = torch.softmax(outputs, dim=1).cpu().numpy()
-        predictions = torch.argmax(outputs, dim=1).cpu().numpy()
-        
-    # 5. Output Results
-    class_names = ['Glioma', 'Meningioma', 'Pituitary']
-    predicted_classes = [class_names[pred] for pred in predictions]
-    
+        logits = model(X_tensor)
+        probs = torch.softmax(logits, dim=1).cpu().numpy()
+        preds = np.argmax(probs, axis=1)
+
+    # Map predictions back to class names
+    inverse_mapping = {0: 'Glioma', 1: 'Meningioma', 2: 'Pituitary'}
+    pred_labels = [inverse_mapping[p] for p in preds]
+
+    # Save to output file
     output_df = pd.DataFrame({
-        'patient_id': df['patient_id'] if 'patient_id' in df.columns else range(len(df)),
-        'predicted_class': predicted_classes,
-        'probability_glioma': probabilities[:, 0],
-        'probability_meningioma': probabilities[:, 1],
-        'probability_pituitary': probabilities[:, 2]
+        'patient_id': patient_ids,
+        'predicted_class': pred_labels,
+        'glioma_prob': probs[:, 0],
+        'meningioma_prob': probs[:, 1],
+        'pituitary_prob': probs[:, 2]
     })
     
     output_df.to_csv(args.output, index=False)
-    print(f"Predictions successfully saved to {args.output}")
+    print(f"Predictions saved successfully to {args.output}")
+
+    # Output first 10 predicted classes to stdout
     print("\nFirst 10 predictions:")
     print(output_df[['patient_id', 'predicted_class']].head(10).to_string(index=False))
 
