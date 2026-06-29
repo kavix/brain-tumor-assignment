@@ -1,0 +1,60 @@
+{
+  "random_seed": 42,
+  "input_dim": 51,
+  "best_config": {
+    "name": "Deeper_Reg",
+    "units_1": 64,
+    "units_2": 32,
+    "units_3": 16,
+    "lr": 0.001,
+    "dropout_rate": 0.5,
+    "l2_reg": 0.01,
+    "batch_size": 32
+  },
+  "numeric_cols": [
+    "age",
+    "bmi",
+    "tumor_size_mm",
+    "tumor_growth_rate",
+    "headache_severity",
+    "mri_intensity",
+    "ct_density",
+    "edema_grade",
+    "ki67_index",
+    "bp_systolic",
+    "bp_diastolic",
+    "wbc_count",
+    "crp_level"
+  ],
+  "categorical_cols": [
+    "gender",
+    "ethnicity",
+    "region",
+    "smoking_status",
+    "family_history",
+    "tumor_location",
+    "nausea",
+    "vision_problems",
+    "seizures",
+    "memory_loss",
+    "balance_issues",
+    "genetic_marker_status"
+  ],
+  "ordinal_cols": [
+    "alcohol_consumption",
+    "contrast_enhancement"
+  ],
+  "ordinal_orders": {
+    "alcohol_consumption": [
+      "None",
+      "Moderate",
+      "Heavy"
+    ],
+    "contrast_enhancement": [
+      "None",
+      "Mild",
+      "Moderate",
+      "Strong"
+    ]
+  }
+}
