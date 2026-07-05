@@ -1,1 +1,1 @@
-## Mchine Leaening Assignment
+## Machine Learning Assignment
